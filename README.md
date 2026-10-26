@@ -274,3 +274,5 @@ Deliberate scope choices for this pass:
 - Keep `@import` rules at the top of `src/styles.css`; load web fonts with a `<link>` tag.
 - Commits sync back to Lovable — don't rewrite published history (no force-push, rebase or amend of
   pushed commits). See the notice at the top of `AGENTS.md`.
+
+<!-- push test by Prenajangate -->
