@@ -14,18 +14,24 @@ export type CustomerVisit = {
   notes?: string;
   workSummary?: string;
 };
+export type CustomerNote = {
+  id: string;
+  createdAt: string;
+  content: string;
+};
 export type CustomerExpense = {
   id: string;
   date: string;
   description: string;
   amount: number;
+  expenseType?: "Machinery" | "Labour" | "Order";
   category?: "material" | "labor" | "other";
   recordKind?: "illustrative";
 };
 export type CustomerCommunication = {
   id: string;
   date: string;
-  channel: "note" | "call" | "whatsapp";
+  channel: "note" | "call" | "message" | "visit" | "whatsapp";
   message: string;
 };
 export type CustomerManualPayment = {
@@ -51,10 +57,12 @@ export type Customer = {
   city?: string;
   createdAt: string;
   notes?: string;
+  avatarUrl?: string;
   photos?: string[]; // data URLs (site photos)
   visitCharge?: number;
   serviceCharge?: number;
   workStatus?: CustomerWorkStatus;
+  notesHistory?: CustomerNote[];
   tags?: string[];
   visits?: CustomerVisit[];
   expenses?: CustomerExpense[];
@@ -348,7 +356,7 @@ const illustrativeStatuses: CustomerWorkStatus[] = [
   "completed",
   "on_hold",
 ];
-const illustrativeNamedCustomers: Customer[] = [
+const illustrativeNamedCustomers: Pick<Customer, "id" | "name" | "phone">[] = [
   {
     id: "illustrative-cus-nitin",
     name: "Nitin Manishnagar",
@@ -1653,6 +1661,10 @@ type Actions = {
     customerId: string,
     visit: Omit<CustomerVisit, "id">,
   ) => void;
+  addCustomerNote: (
+    customerId: string,
+    note: Omit<CustomerNote, "id">,
+  ) => void;
   addCustomerExpense: (
     customerId: string,
     expense: Omit<CustomerExpense, "id">,
@@ -1740,7 +1752,7 @@ type Actions = {
   setPaymentTerms: (v: string) => void;
   setQuotationStatus: (id: string, status: Quotation["status"]) => void;
   setQuotationGrandOverride: (id: string, grand: number | undefined) => void;
-  newBlankQuotation: () => string;
+  newBlankQuotation: (customerId?: string) => string;
   generateQuotationFromCart: (
     customerId: string,
     options?: { terms?: string[]; paymentTerms?: string; hidePrices?: boolean },
@@ -1837,6 +1849,20 @@ export const useVoltcare = create<State & Actions>()(
               ? {
                   ...c,
                   visits: [{ ...visit, id: uid("visit") }, ...(c.visits ?? [])],
+                }
+              : c,
+          ),
+        })),
+      addCustomerNote: (customerId, note) =>
+        set((s) => ({
+          customers: s.customers.map((c) =>
+            c.id === customerId
+              ? {
+                  ...c,
+                  notesHistory: [
+                    { ...note, id: uid("note") },
+                    ...(c.notesHistory ?? []),
+                  ],
                 }
               : c,
           ),
@@ -2080,13 +2106,13 @@ export const useVoltcare = create<State & Actions>()(
         return get().newBlankQuotation();
       },
       setActiveQuotation: (id) => set({ activeQuotationId: id }),
-      newBlankQuotation: () => {
+      newBlankQuotation: (customerId) => {
         const s = get();
         const num = "VC-Q-" + (11947 + s.quotations.length + 1);
         const q: Quotation = {
           id: uid("quo"),
           number: num,
-          customerId: s.customers[0]?.id ?? "",
+          customerId: customerId ?? s.customers[0]?.id ?? "",
           projectName: "",
           floors: ["Ground Floor"],
           createdAt: new Date().toISOString(),
