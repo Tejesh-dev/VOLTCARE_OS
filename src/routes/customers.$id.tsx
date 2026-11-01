@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -131,6 +132,7 @@ function CustomerProfileContent({ id }: { id: string }) {
   const updateCustomer = useVoltcare((s) => s.updateCustomer);
   const addCustomerSitePhotos = useVoltcare((s) => s.addCustomerSitePhotos);
   const addCustomerNote = useVoltcare((s) => s.addCustomerNote);
+  const updateCustomerNote = useVoltcare((s) => s.updateCustomerNote);
   const addCustomerExpense = useVoltcare((s) => s.addCustomerExpense);
   const deleteCustomerExpense = useVoltcare((s) => s.deleteCustomerExpense);
   const addCustomerCommunication = useVoltcare(
@@ -195,8 +197,10 @@ function CustomerProfileContent({ id }: { id: string }) {
   const [status, setStatus] = useState<CustomerWorkStatus>(
     customer?.workStatus ?? "new",
   );
-  const [noteEditorOpen, setNoteEditorOpen] = useState(false);
-  const [noteDraft, setNoteDraft] = useState("");
+  const [newNoteText, setNewNoteText] = useState("");
+  const [isTaskChecked, setIsTaskChecked] = useState(false);
+  const [selectedDate, setSelectedDate] = useState("");
+  const [dueDatePickerOpen, setDueDatePickerOpen] = useState(false);
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false);
   const [expenseType, setExpenseType] = useState<
     "Machinery" | "Labour" | "Order"
@@ -283,6 +287,14 @@ function CustomerProfileContent({ id }: { id: string }) {
   const customerNotes = [...(customer.notesHistory ?? [])].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
+  const today = localDateValue(new Date());
+  const pendingTasks = customerNotes.filter(
+    (note) => note.isTask && !note.isDone,
+  );
+  const noteHistory = customerNotes.filter(
+    (note) => !note.isTask || note.isDone,
+  );
+  const dueTodayTasks = pendingTasks.filter((note) => note.dueDate === today);
   const selectedMaterialList = materialLists.find(
     (list) => list.id === viewMaterialListId,
   );
@@ -298,15 +310,27 @@ function CustomerProfileContent({ id }: { id: string }) {
   };
 
   const saveCustomerNote = () => {
-    const content = noteDraft.trim();
-    if (!content) return;
+    if (!newNoteText.trim()) return;
     addCustomerNote(customer.id, {
-      content,
+      id: Date.now().toString(),
+      text: newNoteText,
+      isTask: isTaskChecked,
+      dueDate: selectedDate,
+      isDone: false,
       createdAt: new Date().toISOString(),
+      doneAt: null,
     });
-    setNoteDraft("");
-    setNoteEditorOpen(false);
+    setNewNoteText("");
+    setIsTaskChecked(false);
+    setSelectedDate("");
     toast.success("Note added");
+  };
+
+  const completeCustomerTask = (noteId: string) => {
+    updateCustomerNote(customer.id, noteId, {
+      isDone: true,
+      doneAt: new Date().toISOString(),
+    });
   };
 
   const saveCustomerExpense = () => {
@@ -624,71 +648,158 @@ function CustomerProfileContent({ id }: { id: string }) {
         </div>
       </div>
 
-      <Section
-        title="Notes"
-        icon={<ClipboardList className="h-4 w-4" />}
-        action={
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="Add note"
-            onClick={() => setNoteEditorOpen((open) => !open)}
+      <Section title="Notes" icon={<ClipboardList className="h-4 w-4" />}>
+        {dueTodayTasks.map((task) => (
+          <div
+            key={`reminder-${task.id}`}
+            role="status"
+            className="border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-800 dark:text-amber-200"
           >
-            <Pencil className="h-4 w-4" />
-          </Button>
-        }
-      >
-        {noteEditorOpen && (
-          <div className="space-y-3 p-3 border-b border-border">
-            <Textarea
-              autoFocus
-              rows={3}
-              value={noteDraft}
-              onChange={(event) => setNoteDraft(event.target.value)}
-              placeholder="Write a note..."
-            />
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setNoteDraft("");
-                  setNoteEditorOpen(false);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                onClick={saveCustomerNote}
-                disabled={!noteDraft.trim()}
-              >
-                Save
-              </Button>
-            </div>
+            🔔 Reminder: Call {customer.name} today - {task.text}
           </div>
-        )}
-        {customerNotes.length === 0 ? (
-          <Empty text="No notes yet." />
-        ) : (
-          customerNotes.map((note) => (
-            <div
-              key={note.id}
-              className="p-3 border-b border-border last:border-0"
+        ))}
+        <div className="space-y-3 p-3 border-b border-border">
+          <Textarea
+            rows={3}
+            value={newNoteText}
+            onChange={(event) => setNewNoteText(event.target.value)}
+            placeholder="15 tarikh ko call karna hai, site complete hui kya?..."
+          />
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={isTaskChecked}
+                onCheckedChange={(checked) =>
+                  setIsTaskChecked(checked === true)
+                }
+              />
+              Is this a Task?
+            </label>
+            <Popover
+              open={dueDatePickerOpen}
+              onOpenChange={setDueDatePickerOpen}
             >
-              <div className="text-xs text-muted-foreground">
-                {new Date(note.createdAt).toLocaleString("en-IN", {
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                })}
-              </div>
-              <div className="mt-1 whitespace-pre-wrap text-sm">
-                {note.content}
-              </div>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="justify-start gap-2"
+                >
+                  <CalendarDays className="h-4 w-4" />
+                  {selectedDate ? displayDateValue(selectedDate) : "Due date"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={
+                    selectedDate
+                      ? new Date(
+                          Number(selectedDate.slice(0, 4)),
+                          Number(selectedDate.slice(5, 7)) - 1,
+                          Number(selectedDate.slice(8, 10)),
+                        )
+                      : undefined
+                  }
+                  onSelect={(date) => {
+                    if (date) setSelectedDate(localDateValue(date));
+                    setDueDatePickerOpen(false);
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+            <Button
+              type="button"
+              className="ml-auto"
+              onClick={saveCustomerNote}
+              disabled={!newNoteText.trim()}
+            >
+              Add
+            </Button>
+          </div>
+        </div>
+        <div className="p-3 border-b border-border">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Pending Tasks
+          </h3>
+          {pendingTasks.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No pending tasks.</p>
+          ) : (
+            <div className="space-y-3">
+              {pendingTasks.map((task) => {
+                const overdue = Boolean(task.dueDate && task.dueDate < today);
+                return (
+                  <div key={task.id} className="flex items-start gap-3">
+                    <Checkbox
+                      checked={false}
+                      onCheckedChange={(checked) => {
+                        if (checked === true) completeCustomerTask(task.id);
+                      }}
+                      aria-label={`Complete task: ${task.text}`}
+                      className="mt-0.5"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="whitespace-pre-wrap text-sm">{task.text}</p>
+                      {task.dueDate && (
+                        <p
+                          className={cn(
+                            "mt-1 text-xs",
+                            overdue
+                              ? "font-semibold text-red-600 dark:text-red-400"
+                              : "text-muted-foreground",
+                          )}
+                        >
+                          Due: {displayDateValue(task.dueDate)}
+                          {overdue && " - OVERDUE"}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ))
-        )}
+          )}
+        </div>
+        <div className="p-3">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            History
+          </h3>
+          {noteHistory.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No notes yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {noteHistory.map((note) => (
+                <div
+                  key={note.id}
+                  className="border-b border-border pb-3 last:border-0 last:pb-0"
+                >
+                  <div className="text-xs text-muted-foreground">
+                    {note.isDone && note.doneAt
+                      ? `Completed on ${new Date(
+                          note.doneAt,
+                        ).toLocaleDateString("en-IN", {
+                          day: "numeric",
+                          month: "short",
+                        })}`
+                      : new Date(note.createdAt).toLocaleString("en-IN", {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}
+                  </div>
+                  <div
+                    className={cn(
+                      "mt-1 whitespace-pre-wrap text-sm",
+                      note.isDone && "text-muted-foreground line-through",
+                    )}
+                  >
+                    {note.text}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </Section>
 
       <Section

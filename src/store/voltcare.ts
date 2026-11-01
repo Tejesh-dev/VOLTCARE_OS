@@ -16,8 +16,12 @@ export type CustomerVisit = {
 };
 export type CustomerNote = {
   id: string;
+  text: string;
+  isTask: boolean;
+  dueDate: string;
+  isDone: boolean;
   createdAt: string;
-  content: string;
+  doneAt: string | null;
 };
 export type CustomerExpense = {
   id: string;
@@ -1662,9 +1666,11 @@ type Actions = {
     customerId: string,
     visit: Omit<CustomerVisit, "id">,
   ) => void;
-  addCustomerNote: (
+  addCustomerNote: (customerId: string, note: CustomerNote) => void;
+  updateCustomerNote: (
     customerId: string,
-    note: Omit<CustomerNote, "id">,
+    noteId: string,
+    patch: Partial<CustomerNote>,
   ) => void;
   addCustomerExpense: (
     customerId: string,
@@ -1868,10 +1874,20 @@ export const useVoltcare = create<State & Actions>()(
             c.id === customerId
               ? {
                   ...c,
-                  notesHistory: [
-                    { ...note, id: uid("note") },
-                    ...(c.notesHistory ?? []),
-                  ],
+                  notesHistory: [note, ...(c.notesHistory ?? [])],
+                }
+              : c,
+          ),
+        })),
+      updateCustomerNote: (customerId, noteId, patch) =>
+        set((s) => ({
+          customers: s.customers.map((c) =>
+            c.id === customerId
+              ? {
+                  ...c,
+                  notesHistory: (c.notesHistory ?? []).map((note) =>
+                    note.id === noteId ? { ...note, ...patch } : note,
+                  ),
                 }
               : c,
           ),
@@ -2745,7 +2761,7 @@ export const useVoltcare = create<State & Actions>()(
           ? localStorage
           : (undefined as unknown as Storage),
       ),
-      version: 15,
+      version: 16,
       migrate: (persistedState, version) => {
         type PersistedVoltcareData = {
           [key: string]: unknown;
@@ -2796,6 +2812,29 @@ export const useVoltcare = create<State & Actions>()(
           version < 15 && Array.isArray(customersToMigrate)
             ? mergeById(customersToMigrate, illustrativeCustomersWithExpenses)
             : customersToMigrate;
+        const customersWithMigratedNotes = Array.isArray(
+          customersWithIllustrativeRecords,
+        )
+          ? (customersWithIllustrativeRecords as Customer[]).map(
+              (customer) => ({
+                ...customer,
+                notesHistory: (customer.notesHistory ?? []).map((note) => {
+                  const legacyNote = note as CustomerNote & {
+                    content?: string;
+                  };
+                  return {
+                    id: note.id,
+                    text: legacyNote.text ?? legacyNote.content ?? "",
+                    isTask: legacyNote.isTask ?? false,
+                    dueDate: legacyNote.dueDate ?? "",
+                    isDone: legacyNote.isDone ?? false,
+                    createdAt: note.createdAt,
+                    doneAt: note.doneAt ?? null,
+                  };
+                }),
+              }),
+            )
+          : customersWithIllustrativeRecords;
         const quotationsWithoutLegacySamples = Array.isArray(base.quotations)
           ? base.quotations.filter(
               (quotation: Quotation) => !quotation.id.startsWith("demo-quo-"),
@@ -2969,7 +3008,7 @@ export const useVoltcare = create<State & Actions>()(
           ...(raw ?? {}),
           ...(base ?? {}),
           ...(Array.isArray(base.customers)
-            ? { customers: customersWithIllustrativeRecords }
+            ? { customers: customersWithMigratedNotes }
             : {}),
           ...(Array.isArray(base.quotations)
             ? { quotations: quotationsToMigrate }
