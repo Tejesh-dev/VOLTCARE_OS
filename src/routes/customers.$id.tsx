@@ -4,7 +4,7 @@
 // zustand store → localStorage). Lists all quotations, material lists,
 // invoices and payments linked to the customer with financial summary.
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 // The /customers layout wraps this route in AppShell + ClientGate already.
 import {
   useVoltcare,
@@ -74,6 +74,21 @@ function displayDateValue(value: string) {
   });
 }
 
+function readImageAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") resolve(reader.result);
+      else reject(new Error("The selected image could not be read."));
+    };
+    reader.onerror = () =>
+      reject(
+        reader.error ?? new Error("The selected image could not be read."),
+      );
+    reader.readAsDataURL(file);
+  });
+}
+
 export const Route = createFileRoute("/customers/$id")({
   head: ({ params }) => ({
     meta: [
@@ -114,6 +129,7 @@ function CustomerProfile() {
 function CustomerProfileContent({ id }: { id: string }) {
   const customer = useVoltcare((s) => s.customers.find((c) => c.id === id));
   const updateCustomer = useVoltcare((s) => s.updateCustomer);
+  const addCustomerSitePhotos = useVoltcare((s) => s.addCustomerSitePhotos);
   const addCustomerNote = useVoltcare((s) => s.addCustomerNote);
   const addCustomerExpense = useVoltcare((s) => s.addCustomerExpense);
   const deleteCustomerExpense = useVoltcare((s) => s.deleteCustomerExpense);
@@ -199,39 +215,43 @@ function CustomerProfileContent({ id }: { id: string }) {
   const [viewMaterialListId, setViewMaterialListId] = useState<string | null>(
     null,
   );
+  const [selectedSitePhoto, setSelectedSitePhoto] = useState<string | null>(
+    null,
+  );
+  const [avatarPreviewOpen, setAvatarPreviewOpen] = useState(false);
+  const [customerAvatar, setCustomerAvatar] = useState(
+    customer?.avatarUrl ?? "",
+  );
+  useEffect(() => {
+    setCustomerAvatar(customer?.avatarUrl ?? "");
+  }, [customer?.avatarUrl]);
 
   if (!customer)
     return <div className="p-8 text-muted-foreground">Customer not found.</div>;
 
-  const onAvatarChange = async (file: File | undefined) => {
+  const onAvatarChange = (file: File | undefined) => {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
       toast.error("Choose an image file for the customer photo.");
       return;
     }
 
-    try {
-      const avatarUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          if (typeof reader.result === "string") resolve(reader.result);
-          else reject(new Error("The selected image could not be read."));
-        };
-        reader.onerror = () =>
-          reject(
-            reader.error ?? new Error("The selected image could not be read."),
-          );
-        reader.readAsDataURL(file);
-      });
-      updateCustomer(customer.id, { avatarUrl });
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result;
+      if (typeof base64 !== "string") {
+        toast.error("The selected image could not be read.");
+        return;
+      }
+      setCustomerAvatar(base64);
+      updateCustomer(customer.id, { avatarUrl: base64 });
       toast.success("Customer photo updated");
-    } catch (error) {
+    };
+    reader.onerror = () =>
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not read the customer photo.",
+        reader.error?.message ?? "Could not read the customer photo.",
       );
-    }
+    reader.readAsDataURL(file);
   };
 
   const qTotal = quotations.reduce((s, q) => s + quotationTotals(q).grand, 0);
@@ -345,22 +365,25 @@ function CustomerProfileContent({ id }: { id: string }) {
     navigate({ to: "/invoices/$id", params: { id: invoice.id } });
   };
 
-  const onAddPhoto = (files: FileList | null) => {
+  const onAddPhoto = async (files: FileList | null) => {
     if (!files || !files.length) return;
-    const readers = Array.from(files).map(
-      (f) =>
-        new Promise<string>((res) => {
-          const r = new FileReader();
-          r.onload = () => res(r.result as string);
-          r.readAsDataURL(f);
-        }),
-    );
-    Promise.all(readers).then((imgs) => {
-      updateCustomer(customer.id, {
-        photos: [...(customer.photos ?? []), ...imgs],
-      });
-      toast.success(`${imgs.length} photo${imgs.length > 1 ? "s" : ""} added`);
-    });
+    const selectedFiles = Array.from(files);
+    if (selectedFiles.some((file) => !file.type.startsWith("image/"))) {
+      toast.error("Choose image files for site photos.");
+      return;
+    }
+
+    try {
+      const images = await Promise.all(selectedFiles.map(readImageAsDataUrl));
+      addCustomerSitePhotos(customer.id, images);
+      toast.success(
+        `${images.length} photo${images.length > 1 ? "s" : ""} added`,
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not read site photos.",
+      );
+    }
   };
 
   const removePhoto = (i: number) => {
@@ -384,20 +407,28 @@ function CustomerProfileContent({ id }: { id: string }) {
             <div className="relative h-14 w-14 shrink-0">
               <button
                 type="button"
-                onClick={() => avatarFileRef.current?.click()}
+                onClick={() => {
+                  if (customerAvatar) setAvatarPreviewOpen(true);
+                  else avatarFileRef.current?.click();
+                }}
                 aria-label={`Change ${customer.name}'s profile photo`}
                 title="Change profile photo"
-                className="group h-full w-full rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                className="group relative h-full w-full cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
               >
-                {customer.avatarUrl ? (
+                {customerAvatar ? (
                   <img
-                    src={customer.avatarUrl}
+                    src={customerAvatar}
                     alt={`${customer.name}'s profile`}
                     className="h-full w-full rounded-full object-cover"
                   />
                 ) : (
                   <span className="flex h-full w-full items-center justify-center rounded-full bg-primary/10 text-xl font-black text-primary">
                     {customer.name.charAt(0).toUpperCase()}
+                  </span>
+                )}
+                {customerAvatar && (
+                  <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/55 text-xs font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                    View
                   </span>
                 )}
                 <span className="absolute -bottom-0.5 -right-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-background bg-emerald-600 text-white">
@@ -764,7 +795,13 @@ function CustomerProfileContent({ id }: { id: string }) {
       {/* Site photos */}
       <div className="card-surface p-5 space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="font-bold">Site Photos</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="font-bold">Site Photos</h2>
+            <span className="text-sm text-muted-foreground">
+              {customer.photos?.length ?? 0}{" "}
+              {(customer.photos?.length ?? 0) === 1 ? "photo" : "photos"}
+            </span>
+          </div>
           <Button
             size="sm"
             variant="outline"
@@ -788,20 +825,28 @@ function CustomerProfileContent({ id }: { id: string }) {
             work.
           </div>
         ) : (
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             {customer.photos!.map((src, i) => (
               <div
                 key={i}
                 className="relative aspect-square rounded-md overflow-hidden border border-border group"
               >
-                <img
-                  src={src}
-                  alt={`site-${i}`}
-                  className="h-full w-full object-cover"
-                />
                 <button
+                  type="button"
+                  onClick={() => setSelectedSitePhoto(src)}
+                  className="h-full w-full cursor-zoom-in"
+                  aria-label={`View site photo ${i + 1}`}
+                >
+                  <img
+                    src={src}
+                    alt={`Site photo ${i + 1}`}
+                    className="h-full w-full object-cover"
+                  />
+                </button>
+                <button
+                  type="button"
                   onClick={() => removePhoto(i)}
-                  className="absolute top-1 right-1 h-6 w-6 rounded-full bg-background/90 border border-border opacity-0 group-hover:opacity-100 flex items-center justify-center text-primary"
+                  className="absolute top-1 right-1 h-6 w-6 rounded-full bg-background/90 border border-border opacity-0 group-hover:opacity-100 focus:opacity-100 flex items-center justify-center text-primary"
                   aria-label="Remove photo"
                 >
                   <Trash2 className="h-3 w-3" />
@@ -811,6 +856,37 @@ function CustomerProfileContent({ id }: { id: string }) {
           </div>
         )}
       </div>
+      <Dialog
+        open={selectedSitePhoto !== null}
+        onOpenChange={(open) => {
+          if (!open) setSelectedSitePhoto(null);
+        }}
+      >
+        <DialogContent className="flex h-screen w-screen max-w-none flex-col items-center justify-center rounded-none border-0 bg-black/95 p-4 sm:rounded-none">
+          <DialogTitle className="sr-only">Site photo</DialogTitle>
+          {selectedSitePhoto && (
+            <img
+              src={selectedSitePhoto}
+              alt="Full-size site photo"
+              className="max-h-full max-w-full object-contain"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={avatarPreviewOpen} onOpenChange={setAvatarPreviewOpen}>
+        <DialogContent className="flex h-screen w-screen max-w-none flex-col items-center justify-center rounded-none border-0 bg-black/95 p-4 sm:rounded-none">
+          <DialogTitle className="sr-only">
+            {customer.name}&apos;s profile photo
+          </DialogTitle>
+          {customerAvatar && (
+            <img
+              src={customerAvatar}
+              alt={`${customer.name}'s profile`}
+              className="max-h-full max-w-full rounded-full object-contain"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Quotations */}
       <Section

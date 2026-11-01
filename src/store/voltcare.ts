@@ -1657,6 +1657,7 @@ type Actions = {
   // customers
   addCustomer: (c: Omit<Customer, "id" | "createdAt">) => Customer;
   updateCustomer: (id: string, patch: Partial<Customer>) => void;
+  addCustomerSitePhotos: (customerId: string, photos: string[]) => void;
   addCustomerVisit: (
     customerId: string,
     visit: Omit<CustomerVisit, "id">,
@@ -1840,6 +1841,14 @@ export const useVoltcare = create<State & Actions>()(
         set((s) => ({
           customers: s.customers.map((c) =>
             c.id === id ? { ...c, ...patch } : c,
+          ),
+        })),
+      addCustomerSitePhotos: (customerId, photos) =>
+        set((s) => ({
+          customers: s.customers.map((c) =>
+            c.id === customerId
+              ? { ...c, photos: [...(c.photos ?? []), ...photos] }
+              : c,
           ),
         })),
       addCustomerVisit: (customerId, visit) =>
